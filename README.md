@@ -217,6 +217,8 @@ docker exec -it pgvector psql -U postgres -d postgres -c "SELECT extname FROM pg
 
 ## 2. DB 구축 방법 (둘 중 하나 선택)
 
+- 데이터 (비공개) : https://drive.google.com/drive/folders/1bjjjzmm-LgbuZfPAz6Ma32jrFWphj2SP?usp=drive_link
+
 공통 흐름: **데이터 적재 → ai-service 기동 → re-embedding**.
 
 1. **데이터 적재** — 방법 1(CSV) 또는 방법 2(엑셀)로 테이블·데이터를 채운다.
@@ -224,6 +226,8 @@ docker exec -it pgvector psql -U postgres -d postgres -c "SELECT extname FROM pg
 3. **re-embedding** — `POST /api/v1/re-embedding` 으로 모든 내담자 임베딩을 계산해 DB에 넣는다. 이 단계를 거쳐야 추천 API가 유사 케이스를 검색할 수 있다.
 
 ### 방법 1: 이미 구성된 CSV로 구축
+
+
 
 `Backend/database/` 의 CSV(`clients.csv`, `consultation.csv`, `training.csv`, `employments.csv`)로 테이블 생성·데이터 적재를 한 번에 한다.
 
