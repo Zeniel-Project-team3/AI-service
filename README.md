@@ -164,6 +164,8 @@ AiResponseDto response = restClient.post()
 
 # AI 팀용 (개발·실험)
 
+![ai-service 추천 API 아키텍처](docs/ai-service-architecture.png)
+
 개발 시 uvicorn으로 실행하고, 필요 시 Docker 이미지 빌드·푸시까지 진행할 때 참고하는 문서입니다. **현재 README의 거의 모든 내용을 포함합니다.**
 
 ## 요구사항
@@ -226,8 +228,6 @@ docker exec -it pgvector psql -U postgres -d postgres -c "SELECT extname FROM pg
 3. **re-embedding** — `POST /api/v1/re-embedding` 으로 모든 내담자 임베딩을 계산해 DB에 넣는다. 이 단계를 거쳐야 추천 API가 유사 케이스를 검색할 수 있다.
 
 ### 방법 1: 이미 구성된 CSV로 구축
-
-
 
 `Backend/database/` 의 CSV(`clients.csv`, `consultation.csv`, `training.csv`, `employments.csv`)로 테이블 생성·데이터 적재를 한 번에 한다.
 
