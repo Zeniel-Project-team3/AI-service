@@ -5,6 +5,29 @@
 - **Java 백엔드 팀**: 아래 **「Java 백엔드 팀용」**만 보면 됩니다. Docker 이미지 pull 후 `.env`만 맞추면 됩니다.
 - **AI 팀**: **「AI 팀용 (개발·실험)」**에서 DB 구축, uvicorn 실행, Docker 빌드, API 상세까지 확인하세요.
 
+## 목차
+
+### [Java 백엔드 팀용 (Docker 이미지로 연동)](#java-백엔드-팀용-docker-이미지로-연동)
+- [요구사항](#요구사항)
+- [1. .env 준비](#1-env-준비)
+- [2. 이미지 pull 및 실행](#2-이미지-pull-및-실행)
+- [3. 동작 확인](#3-동작-확인)
+- [4. Java에서 호출](#4-java에서-호출)
+- [5. Java 연동 (Request/Response)](#5-java-연동-requestresponse)
+
+### [AI 팀용 (개발·실험)](#ai-팀용-개발실험)
+- [요구사항](#요구사항-1)
+- [1. DB 준비](#1-db-준비)
+- [2. DB 구축 방법 (둘 중 하나 선택)](#2-db-구축-방법-둘-중-하나-선택)
+- [3. .env 설정](#3-env-설정)
+- [4. 실행 방법](#4-실행-방법)
+- [5. 임베딩·유사도 요약](#5-임베딩유사도-요약)
+- [6. DB 구조 (스키마)](#6-db-구조-스키마)
+- [7. /api/v1/recommend 동작 요약](#7-apiv1recommend-동작-요약)
+- [8. /api/v1/re-embedding 동작 요약](#8-apiv1-re-embedding-동작-요약)
+- [9. /api/v1/ingest-employment-training 동작요약](#9-apiv1ingest-employment-training-동작요약)
+
+
 ---
 
 # Java 백엔드 팀용 (Docker 이미지로 연동)
@@ -80,7 +103,62 @@ curl -X POST "http://localhost:8001/api/v1/recommend" \
 - **Request:** `{"clientId": number, "topK": number}` — `topK` 생략 시 5
 - **Response:** `clientId`, `maskedInput`, `queryText`, `similarCases`, `recommendation` (추천 직무·훈련·서비스·질문 등)
 
-상세 스키마는 아래 **「AI 팀용」** 의 **「Java 연동 (Request/Response)」** 를 참고하면 됩니다.
+
+---
+
+## 5. Java 연동 (Request/Response)
+
+**URL:** `POST http://<호스트>:8001/api/v1/recommend`
+
+### Request
+
+| 필드 | 타입 | 필수 | 설명 |
+|------|------|------|------|
+| clientId | number | O | 내담자 ID (DB `clients.id`) |
+| topK | number | X | 유사 케이스 개수 (기본 5, 1~20) |
+
+예: `{"clientId": 1, "topK": 5}`
+
+### Response
+
+| 필드 | 타입 | 설명 |
+|------|------|------|
+| clientId | number | 요청한 내담자 ID |
+| maskedInput | object | 마스킹된 내담자 정보 |
+| queryText | string | 임베딩에 사용한 텍스트 |
+| similarCases | array | 유사 케이스 목록 |
+| recommendation | object | 추천 결과 |
+
+`recommendation` 내부:
+
+| 필드 | 타입 | 설명 |
+|------|------|------|
+| recommendedJobsByProfile | string[] | 나이·성별·학력·역량·전공만 고려한 추천 직무 3개 |
+| recommendedJobsByDesiredJob | string[] | 희망직종 반영 추천 직무 3개 |
+| recommendedTrainings | string[] | 추천 직업훈련 과정명 |
+| recommendedCompanies | string[] | 추천 취업처 |
+| expectedSalaryRange | string \| null | 예상 연봉 범위 |
+| suggestedServices | string[] | 제안 서비스 |
+| coreQuestions | string[] | 상담 핵심 질문 |
+| reason | string \| null | 추천 근거 |
+
+### Java 호출 예시
+
+```java
+AiRequestDto request = new AiRequestDto(123, 5);
+AiResponseDto response = restClient.post()
+    .uri("http://localhost:8001/api/v1/recommend")
+    .body(request)
+    .retrieve()
+    .body(AiResponseDto.class);
+```
+
+| 환경 | `<호스트>` 예시 |
+|------|------------------|
+| Java와 같은 PC에서 Docker 실행 | localhost |
+| Docker Compose 등 같은 네트워크 | 서비스 이름 또는 localhost |
+| 다른 서버에 배포 | 해당 서버 IP 또는 도메인 |
+
 
 ---
 
@@ -375,57 +453,4 @@ docker run -d -p 8001:8001 --env-file .env --name ai-recommendation \
 - **호출:** `POST /api/v1/ingest-employment-training` (body 없음)
 - 테이블이 없으면 `CREATE TABLE IF NOT EXISTS` 후 INSERT.
 
----
 
-## 10. Java 연동 (Request/Response)
-
-**URL:** `POST http://<호스트>:8001/api/v1/recommend`
-
-### Request
-
-| 필드 | 타입 | 필수 | 설명 |
-|------|------|------|------|
-| clientId | number | O | 내담자 ID (DB `clients.id`) |
-| topK | number | X | 유사 케이스 개수 (기본 5, 1~20) |
-
-예: `{"clientId": 1, "topK": 5}`
-
-### Response
-
-| 필드 | 타입 | 설명 |
-|------|------|------|
-| clientId | number | 요청한 내담자 ID |
-| maskedInput | object | 마스킹된 내담자 정보 |
-| queryText | string | 임베딩에 사용한 텍스트 |
-| similarCases | array | 유사 케이스 목록 |
-| recommendation | object | 추천 결과 |
-
-`recommendation` 내부:
-
-| 필드 | 타입 | 설명 |
-|------|------|------|
-| recommendedJobsByProfile | string[] | 나이·성별·학력·역량·전공만 고려한 추천 직무 3개 |
-| recommendedJobsByDesiredJob | string[] | 희망직종 반영 추천 직무 3개 |
-| recommendedTrainings | string[] | 추천 직업훈련 과정명 |
-| recommendedCompanies | string[] | 추천 취업처 |
-| expectedSalaryRange | string \| null | 예상 연봉 범위 |
-| suggestedServices | string[] | 제안 서비스 |
-| coreQuestions | string[] | 상담 핵심 질문 |
-| reason | string \| null | 추천 근거 |
-
-### Java 호출 예시
-
-```java
-AiRequestDto request = new AiRequestDto(123, 5);
-AiResponseDto response = restClient.post()
-    .uri("http://localhost:8001/api/v1/recommend")
-    .body(request)
-    .retrieve()
-    .body(AiResponseDto.class);
-```
-
-| 환경 | `<호스트>` 예시 |
-|------|------------------|
-| Java와 같은 PC에서 Docker 실행 | localhost |
-| Docker Compose 등 같은 네트워크 | 서비스 이름 또는 localhost |
-| 다른 서버에 배포 | 해당 서버 IP 또는 도메인 |
