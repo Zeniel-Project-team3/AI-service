@@ -4,7 +4,9 @@ database/ 폴더의 CSV로 PostgreSQL(pgvector) DB를 구축하는 스크립트.
 Backend 레포 루트에서 실행: python ai-service/scripts/seed_from_csv.py
 또는 ai-service에서: python scripts/seed_from_csv.py
 
-필수: .env에 DB_URL(또는 DB_HOST/DB_PORT/DB_NAME/DB_USER/DB_PASSWORD) 설정.
+스크립트 실행 시 ai-service/.env 를 자동으로 읽는다. (Backend 루트에서 실행해도 ai-service/.env 적용)
+필수: .env에 DB_URL(또는 DB_HOST/...) 설정.
+필수: .env에 DATABASE_DIR(또는 CSV_DATABASE_DIR)에 CSV 폴더 경로 설정. 비우면 에러로 종료.
 CSV 스키마:
   - clients.csv: 8번째 컬럼(헤더 "embedding") → DB의 education 컬럼
   - consultation.csv: summary
@@ -14,6 +16,7 @@ CSV 스키마:
 from __future__ import annotations
 
 import csv
+import os
 import sys
 from pathlib import Path
 
@@ -24,7 +27,18 @@ _BACKEND_ROOT = _AI_SERVICE_ROOT.parent
 if str(_AI_SERVICE_ROOT) not in sys.path:
     sys.path.insert(0, str(_AI_SERVICE_ROOT))
 
-DATABASE_DIR = _BACKEND_ROOT / "database"
+# ai-service/.env 로드 (Backend 루트에서 실행해도 DB_*, DATABASE_DIR 등 적용)
+from dotenv import load_dotenv
+_env_file = _AI_SERVICE_ROOT / ".env"
+if _env_file.exists():
+    load_dotenv(_env_file)
+
+# CSV가 있는 폴더. .env의 DATABASE_DIR(또는 CSV_DATABASE_DIR) 필수. 비우면 에러.
+_env_db_dir = os.environ.get("DATABASE_DIR") or os.environ.get("CSV_DATABASE_DIR")
+if not _env_db_dir or not _env_db_dir.strip():
+    print("ERROR: DATABASE_DIR (or CSV_DATABASE_DIR) is required. Set it in ai-service/.env to the path of the folder containing clients.csv, etc.")
+    sys.exit(1)
+DATABASE_DIR = Path(_env_db_dir.strip()).resolve()
 
 
 def _get_conn():

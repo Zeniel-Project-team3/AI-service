@@ -227,6 +227,25 @@ docker exec -it pgvector psql -U postgres -d postgres -c "SELECT extname FROM pg
 
 `Backend/database/` 의 CSV(`clients.csv`, `consultation.csv`, `training.csv`, `employments.csv`)로 테이블 생성·데이터 적재를 한 번에 한다.
 
+**`database` 폴더 (필수):**
+
+- 시드 스크립트는 **`DATABASE_DIR`**(또는 `CSV_DATABASE_DIR`)이 **필수**이다. **ai-service/.env** 에 CSV가 있는 폴더의 **절대 경로**를 넣어 두면 된다. 비우면 스크립트가 에러로 종료한다.
+- 스크립트 실행 시 **ai-service/.env** 를 자동으로 읽는다.
+
+```
+Backend/
+├── ai-service/
+│   └── scripts/
+│       └── seed_from_csv.py
+└── database/           ← 예: .env에 DATABASE_DIR=/path/to/Backend/database
+    ├── clients.csv
+    ├── consultation.csv
+    ├── employments.csv
+    └── training.csv
+```
+
+스크립트는 **Backend 루트에서** `python3 ai-service/scripts/seed_from_csv.py` 로 실행한다.
+
 1. **PostgreSQL + pgvector** 실행 (위 참고).
 2. **ai-service `.env`** 에 DB 접속 정보 설정 (호스트 uvicorn 시 `DB_URL=127.0.0.1:5432/postgres` 등).
 3. **시드 스크립트 실행** (Backend 루트에서):
