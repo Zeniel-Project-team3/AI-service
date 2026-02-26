@@ -1,45 +1,98 @@
 # AI 추천 서비스 (ai-service)
 
-내담자 프로필 기반 유사 케이스 검색 + GPT 추천(직무/훈련/상담 질문 등)을 제공하는 API입니다.  
-**Java 팀은 Python 설치 없이 Docker만 있으면 실행·연동할 수 있습니다.**
+내담자 프로필 기반 유사 케이스 검색 + GPT 추천(직무/훈련/상담 질문 등)을 제공하는 API입니다.
+
+- **Java 백엔드 팀**: 아래 **「Java 백엔드 팀용」**만 보면 됩니다. Docker 이미지 pull 후 `.env`만 맞추면 됩니다.
+- **AI 팀**: **「AI 팀용 (개발·실험)」**에서 DB 구축, uvicorn 실행, Docker 빌드, API 상세까지 확인하세요.
 
 ---
 
-## 임베딩·유사도 검색이란?
+# Java 백엔드 팀용 (Docker 이미지로 연동)
 
-- **임베딩값**: 내담자 **나이, 성별, 희망직종**만 모아 한 문장으로 만든 뒤, OpenAI 임베딩 API(`text-embedding-3-small`)로 받은 **숫자 벡터**입니다. (희망직종이 없으면 "(미정)"으로 넣음)
-- **유사도**: DB에 저장된 다른 내담자 임베딩과 **코사인 거리**로 비교해, 거리가 작은 순으로 Top-K를 뽑습니다.
-
-**추천직무는 2가지로**
-
-- **희망직종이 있을 때**: 유사 케이스(나이·성별·희망직종 기준)를 바탕으로, 그 희망직종을 반영한 직무·훈련·연봉·서비스·질문을 추천합니다.
-- **희망직종이 없을 때**: 나이·성별·학력·역량·전공과 유사 케이스를 고려해 **희망직종 후보(추천 직무) 3개**까지 포함해 추천합니다. (직종이 고민될 때 직종까지 추천)
-
-**DB에 이미 임베딩이 있는 경우**
-
-- 요청 시 **나이·성별·희망직종**으로 만든 텍스트의 해시를 비교합니다.  
-  해시가 이전과 다르면(값이 바뀌었거나 임베딩에 쓰는 필드가 변경된 경우) **새로 임베딩을 계산해 DB에 덮어씁니다.**  
-  해시가 같으면 기존 임베딩을 그대로 씁니다.
-
----
+**전제:** 데이터베이스는 본인 로컬에 이미 구축된 상태입니다. AI 서비스는 GitHub 사설 저장소의 Docker 이미지를 pull 받아 사용합니다.
 
 ## 요구사항
 
-- **Docker** (이미지 빌드 및 컨테이너 실행)
-- **.env 파일** (DB 접속 정보, OpenAI API 키)
+- **Docker**
+- **`.env` 파일** — DB 접속 정보, OpenAI API 키 (이미지에 포함되지 않으므로 반드시 로컬에서 설정)
+
+## 1. .env 준비
+
+`ai-service/.env`를 만들고 다음을 채웁니다.
+
+**필수**
+
+- `OPENAI_API_KEY` — GPT·임베딩 호출용
+- `DB_URL` 또는 `DB_HOST`/`DB_PORT`/`DB_NAME`/`DB_USER`/`DB_PASSWORD` — **로컬에 띄운 PostgreSQL** 접속 정보
+
+**DB 주소**
+
+- **컨테이너에서 ai-service를 실행할 때**  
+  DB가 호스트(같은 PC)에서 돌면, 컨테이너 안에서는 호스트를 **`host.docker.internal`**로 접속해야 합니다.  
+  예: `DB_URL=host.docker.internal:5432/postgres`  
+  **Linux**에서는 `host.docker.internal`이 기본이 아니므로, 아래 `docker run`에 **`--add-host=host.docker.internal:host-gateway`** 를 붙입니다.
+- **호스트에서 직접 uvicorn으로 실행할 때**  
+  DB 주소는 **`127.0.0.1`** 또는 **`localhost`** (예: `DB_URL=127.0.0.1:5432/postgres`).
+
+예시 (로컬 pgvector 기준, 컨테이너에서 실행):
+
+```env
+OPENAI_API_KEY=sk-...
+DB_URL=host.docker.internal:5432/postgres
+DB_USERNAME=postgres
+DB_PASSWORD=postgres
+```
+
+## 2. 이미지 pull 및 실행
+
+**비공개 이미지인 경우** — 먼저 로그인 (GitHub 사용자명 + Personal Access Token, scope: `read:packages`):
+
+```bash
+docker login ghcr.io -u <GitHub사용자명> -p <PAT>
+```
+
+**pull 및 실행:**
+
+```bash
+cd ai-service   # .env가 있는 디렉터리
+docker pull ghcr.io/zeniel-project-team3/ai-service:latest
+# 또는 :gpt-model 등 사용 중인 태그
+
+# Linux: --add-host 필요. Windows/Mac Docker Desktop은 생략 가능
+docker run -d -p 8001:8001 --env-file .env --name ai-recommendation \
+  --add-host=host.docker.internal:host-gateway \
+  ghcr.io/zeniel-project-team3/ai-service:latest
+```
+
+레포가 public이면 패키지도 public일 때 로그인 없이 `docker pull` 가능합니다.
+
+## 3. 동작 확인
+
+```bash
+curl -X POST "http://localhost:8001/api/v1/recommend" \
+  -H "Content-Type: application/json" \
+  -d '{"clientId": 1, "topK": 5}'
+```
+
+## 4. Java에서 호출
+
+- **URL:** `POST http://<호스트>:8001/api/v1/recommend`
+- **Request:** `{"clientId": number, "topK": number}` — `topK` 생략 시 5
+- **Response:** `clientId`, `maskedInput`, `queryText`, `similarCases`, `recommendation` (추천 직무·훈련·서비스·질문 등)
+
+상세 스키마는 아래 **「AI 팀용」** 의 **「Java 연동 (Request/Response)」** 를 참고하면 됩니다.
 
 ---
 
-## DB가 이미 구성된 경우 (요약)
+# AI 팀용 (개발·실험)
 
-**데이터베이스가 이미 띄워져 있고, `clients` 등 스키마·데이터가 준비되어 있다면** 아래만 하면 됩니다.
+개발 시 uvicorn으로 실행하고, 필요 시 Docker 이미지 빌드·푸시까지 진행할 때 참고하는 문서입니다. **현재 README의 거의 모든 내용을 포함합니다.**
 
-1. **`.env` 설정** — `DB_URL`(또는 DB_HOST/DB_PORT/DB_NAME/DB_USER/DB_PASSWORD), `OPENAI_API_KEY` 반드시 설정.
-2. **서비스 실행** — `docker build` 후 `docker run` (또는 로컬에서는 `uvicorn app.main:app --host 0.0.0.0 --port 8001`).
-3. **호출** — `POST http://localhost:8001/api/v1/recommend` 에 `{"clientId": 1, "topK": 5}` 등으로 요청.
+## 요구사항
 
-- `employment`, `training` 테이블이 없어도 **recommend**는 동작합니다. (유사 케이스에 취업·훈련 정보만 빠질 뿐.)
-- **ingest**(`/api/v1/ingest-employment-training`)는 선택 사항입니다. 사용하려면 `.env`에 **`INGEST_EXCEL_PATH`** 로 엑셀 파일 경로를 넣어야 하며, 호출 시 해당 경로의 파일을 읽어 채웁니다.
+- **Docker** (DB·이미지 빌드용)
+- **Python 3.11+** (uvicorn 개발 실행)
+- **`.env`** (DB 접속 정보, OpenAI API 키)
 
 ---
 
@@ -47,19 +100,23 @@
 
 AI 서비스는 **pgvector 확장**이 있는 PostgreSQL에 접속해야 합니다.
 
-**팀원들은 프로젝트 루트 `readme.md`대로 각자 localhost에 pgvector를 띄워 두고 있습니다.**  
-(동일 이미지 `pgvector/pgvector:pg17`, 포트 5432, 계정 postgres/postgres)  
-→ 그 DB에 연결하면 되므로 **별도 DB 띄울 필요 없이** 아래 `.env`에 `127.0.0.1:5432/postgres` 등 접속 정보만 넣으면 됩니다.
+**PostgreSQL + pgvector 실행 (이미 띄웠으면 생략)**
 
-DB를 아직 안 띄웠다면 루트 `readme.md` 1~2단계를 먼저 진행하세요.  
-또는 이 디렉터리에서만 pgvector를 쓰고 싶다면:
+```bash
+docker run -d --name pgvector -p 5432:5432 \
+  -e POSTGRES_USER=postgres -e POSTGRES_PASSWORD=postgres \
+  -v pgdata:/var/lib/postgresql/data \
+  pgvector/pgvector:pg17
+
+docker exec -it pgvector psql -U postgres -d postgres -c "CREATE EXTENSION IF NOT EXISTS vector;"
+```
+
+또는 `ai-service` 디렉터리에서 한 번만 실행하면 된다. `db/init/01-enable-vector.sql` 덕분에 vector 확장이 자동으로 생성된다.
 
 ```bash
 cd ai-service
 docker compose up -d
 ```
-
-- 위 명령은 **DB 서버(컨테이너)만 띄우는 것**입니다. DB·테이블을 생성하는 단계는 아닙니다.
 
 확인:
 
@@ -68,89 +125,117 @@ docker compose ps
 docker exec -it pgvector psql -U postgres -d postgres -c "SELECT extname FROM pg_extension WHERE extname = 'vector';"
 ```
 
-시드/스키마가 필요하면 (선택):
+**DB 접속 주소 (실행 환경별)**
 
-```bash
-docker exec -i pgvector psql -U postgres -d postgres < /home/kosa/Backend/src/main/java/com/zeniel/utility/generate_embed_column.sql
-```
-
-- 위 SQL 파일은 **postgres DB + 테이블 1개(`clients`) + `clients` 시드 데이터**까지 넣는 과정입니다.  
-- **`employment`, `training`, `consultation`** 테이블은 Java 시드 SQL에 없어서 **우리가 따로 만든다.** AI 서비스에서 엑셀 ingest(`POST /api/v1/ingest-employment-training`) 호출 시 세 테이블 모두 `CREATE TABLE IF NOT EXISTS`로 생성한 뒤, 엑셀 데이터를 채운다.
-
-### DB 구조 (스키마)
-
-AI 서비스가 사용하는 PostgreSQL 스키마 요약입니다. **pgvector** 확장 필요 (`CREATE EXTENSION vector;`).
-
-**필요한 테이블 종류**
-
-| 개수 | 테이블 | 필수 여부 | 비고 |
-|------|--------|-----------|------|
-| **1개** | **`clients`** | **필수** | 내담자 마스터. 없으면 recommend 자체가 안 됨. |
-| 2개 | `employment`, `training` | 선택 | 없어도 recommend는 동작. 있으면 유사 케이스에 취업·훈련 정보 포함. |
-| 3개 | `consultation` | 선택 | 없어도 recommend는 동작. 있으면 유사 케이스에 상담 내역 포함. |
-
-**테이블별 설명**
-
-| 테이블 | 설명 |
-|--------|------|
-| `clients` | 내담자 마스터. Java 쪽 SQL 덤프 또는 시드로 채움. 임베딩·유사도 검색의 기준. |
-| `consultation` | 상담 내역. AI 서비스 엑셀 ingest 시 `CREATE TABLE IF NOT EXISTS`로 생성 후 채움. |
-| `employment` | 취업 이력(취업처·직무·급여 등). 엑셀 ingest로 채움. **job_title**이 있는 행만 유사 케이스 검색에 사용. |
-| `training` | 직업훈련 이력(과정명·기간 등). 엑셀 ingest로 채움. |
-
-**팀 전달용: 테이블별 유일 키 · 필요 필드**
-
-| 테이블 | 유일 키 | 필요한 필드 (AI 서비스가 읽거나 씀) |
-|--------|---------|--------------------------------------|
-| **clients** | `id` | **필수:** id, name, resident_id, age, gender, education, desired_job, competency, address, university, major, embedding. |
-| **employment** | `id` | client_id, job_title, company_name, salary (유사 케이스: 클라이언트당 최신 1건, job_title 있는 행만 사용). |
-| **training** | `id` | client_id, course_name (유사 케이스: 클라이언트당 distinct로 배열). |
-| **consultation** | `id` | client_id, summary (유사 케이스: 클라이언트당 최신 1건). |
-
-- `clients.embedding`은 vector(1536) 타입, pgvector 확장 필요.
-- `embedding_source_hash`는 AI 서비스가 선택적으로 쓰는 컬럼(없어도 동작함). 팀 DB에 없으면 넣지 않아도 됨.
+- **호스트에서 실행 (uvicorn)**  
+  DB가 같은 PC에서 돌면 `.env`의 DB 주소는 **`127.0.0.1`** 또는 **`localhost`**.  
+  예: `DB_URL=127.0.0.1:5432/postgres`
+- **도커 컨테이너에서 실행**  
+  DB가 호스트에서 돌면 컨테이너 안에서는 **`host.docker.internal`**.  
+  예: `DB_URL=host.docker.internal:5432/postgres`  
+  **Linux**에서는 `docker run` 시 **`--add-host=host.docker.internal:host-gateway`** 를 붙인다.
 
 ---
 
-### 어떤 정보를 뽑아서 어디에 merge(사용)하는지
+## 2. DB 구축 방법 (둘 중 하나 선택)
 
-/api/v1/recommend 한 번 호출 시
-- 프로필 조회: clients에서 id, name, resident_id, age, gender, education, desired_job, competency, address, university, major → maskedInput·queryText 생성
-- 임베딩: 그중 age, gender, desired_job만 합쳐서 임베딩 텍스트 → OpenAI → embedding 저장·유사도 검색
-- 유사 케이스: clients + employment(job_title 있는 사람만) + training + consultation를 join해서 similarCases로 반환 (address 제외)
-- GPT: maskedInput의 age, gender, education, desiredJobs, competency, major + similarCases 각 건 → recommendation 생성
-- rule-based: similarCases에서 trainings, jobTitle, desiredJob, companyName, salary 뽑아서 초안 생성 후 GPT가 보정
+공통 흐름: **데이터 적재 → ai-service 기동 → re-embedding**.
 
+1. **데이터 적재** — 방법 1(CSV) 또는 방법 2(엑셀)로 테이블·데이터를 채운다.
+2. **ai-service 기동** — uvicorn 또는 Docker.
+3. **re-embedding** — `POST /api/v1/re-embedding` 으로 모든 내담자 임베딩을 계산해 DB에 넣는다. 이 단계를 거쳐야 추천 API가 유사 케이스를 검색할 수 있다.
+
+### 방법 1: 이미 구성된 CSV로 구축
+
+`Backend/database/` 의 CSV(`clients.csv`, `consultation.csv`, `training.csv`, `employments.csv`)로 테이블 생성·데이터 적재를 한 번에 한다.
+
+1. **PostgreSQL + pgvector** 실행 (위 참고).
+2. **ai-service `.env`** 에 DB 접속 정보 설정 (호스트 uvicorn 시 `DB_URL=127.0.0.1:5432/postgres` 등).
+3. **시드 스크립트 실행** (Backend 루트에서):
+
+   ```bash
+   cd /path/to/Backend
+   python3 ai-service/scripts/seed_from_csv.py
+   ```
+
+4. **ai-service 기동** 후 **re-embedding** 호출:
+
+   ```bash
+   # 터미널 1
+   cd ai-service && uvicorn app.main:app --host 0.0.0.0 --port 8001
+
+   # 터미널 2
+   curl -X POST "http://localhost:8001/api/v1/re-embedding"
+   ```
+
+5. **추천 API 테스트:**
+
+   ```bash
+   curl -X POST "http://localhost:8001/api/v1/recommend" \
+     -H "Content-Type: application/json" \
+     -d '{"clientId": 1, "topK": 5}'
+   ```
+
+### 방법 2: 엑셀 원본 파일로 구축
+
+`POST /api/v1/ingest-employment-training` 은 **clients 테이블을 만들거나 적재하지 않는다.** employment, training, consultation 테이블만 생성·적재하고, 엑셀의 "참여자 이름 + 주민등록번호"로 **이미 있는 clients**와 매칭한다.  
+그래서 방법 2를 쓰려면 **clients는 미리 다른 방법으로 채워 두어야 한다.**
+
+1. **PostgreSQL + pgvector** 실행.
+2. **clients 테이블 + 내담자 데이터**를 먼저 넣기 (둘 중 하나):
+   - **Java 시드 SQL:** Backend 레포의 `src/main/java/com/zeniel/utility/generate_embed_column.sql` 등을 psql로 실행해 clients 테이블과 시드 데이터를 넣는다.
+   ```bash
+   cd /home/kosa/Backend
+   docker exec -i pgvector psql -U postgres -d postgres < src/main/java/com/zeniel/utility/generate_embed_column.sql
+   ``` 
+3. **`.env`** 에 엑셀 경로 설정:
+
+   ```env
+   INGEST_EXCEL_PATH=/절대경로/상담리스트_가공데이터_202602.xlsx
+   ```
+
+4. **ai-service 기동** 후 **ingest** 호출 (테이블 없으면 생성 후 데이터 적재):
+
+   ```bash
+   curl -X POST "http://localhost:8001/api/v1/ingest-employment-training"
+   ```
+
+5. **re-embedding** 호출:
+
+   ```bash
+   curl -X POST "http://localhost:8001/api/v1/re-embedding"
+   ```
+
+6. **추천 API 테스트:** 위와 동일하게 `POST /api/v1/recommend` 호출.
 
 ---
 
-## 2. .env 설정
+## 3. .env 설정
 
-`ai-service/.env` 파일을 준비합니다. 없으면 `.env.example`을 복사한 뒤 값만 수정하세요.
+`ai-service/.env`를 준비한다. 없으면 `.env.example`을 복사한 뒤 값만 수정.
 
 ```bash
 cp .env.example .env
-# .env를 열어 DB 접속 정보·OPENAI_API_KEY 등 수정
 ```
 
-**필수:**
+**필수**
 
 - `OPENAI_API_KEY` — GPT·임베딩 호출용
-- `DB_URL` 또는 `DB_HOST`/`DB_PORT`/`DB_NAME`/`DB_USER`/`DB_PASSWORD` — 위에서 준비한 PostgreSQL 접속 정보
+- `DB_URL` 또는 `DB_HOST`/`DB_PORT`/`DB_NAME`/`DB_USER`/`DB_PASSWORD` — PostgreSQL 접속 정보
 
-**선택:**
+**선택**
 
 - `INGEST_EXCEL_PATH` — 엑셀 ingest(`POST /api/v1/ingest-employment-training`) 사용 시 엑셀 파일 절대 경로. 비우면 ingest 호출 시 503.
-- `RECOMMEND_MODE` — 추천 모드. **기본값 `fast`**(5초 내 응답 목표). 정확도 우선이면 `accuracy`.
+- `RECOMMEND_MODE` — **기본값 `fast`** (5초 내 응답 목표). 정확도 우선이면 `accuracy`.
 
-**추천 모드 (RECOMMEND_MODE)**
+| RECOMMEND_MODE | 설명 |
+|----------------|------|
+| **fast** (기본) | 유사 케이스 3건만 GPT에 전달, 응답 속도 우선. |
+| **accuracy**   | 유사 케이스 5건 전달, 추천 품질 우선. |
 
-| 값 | 설명 |
-|----|------|
-| **fast** (기본) | 5초 버전. 유사 케이스 3건만 GPT에 전달, 토큰·온도 제한으로 응답 속도 우선. |
-| **accuracy** | 정확도 우선. 유사 케이스 5건 전달, 토큰·온도 완화로 추천 품질 우선. |
+예시 (로컬 pgvector, 호스트에서 uvicorn 실행 시).
 
-**예시 (로컬 pgvector 컨테이너 사용 시):**
+**Option A) DB_URL 한 줄로 (Java/Spring과 동일하게):**
 
 ```env
 OPENAI_API_KEY=sk-...
@@ -159,11 +244,42 @@ DB_USERNAME=postgres
 DB_PASSWORD=postgres
 ```
 
+**Option B) 호스트·포트·DB명 따로 (uvicorn 시 `DB_HOST=localhost`, Docker 시 `DB_HOST=host.docker.internal` 등):**
+
+```env
+OPENAI_API_KEY=sk-...
+DB_HOST=localhost
+DB_PORT=5432
+DB_NAME=postgres
+DB_USER=postgres
+DB_PASSWORD=postgres
+```
+
 ---
 
-## 3. AI 서비스 실행 (Docker, Python 불필요)
+## 4. 실행 방법
 
-같은 디렉터리에서 이미지 빌드 후 실행합니다.
+### 4.1 개발용: uvicorn (로컬 실험)
+
+```bash
+cd ai-service
+python3 -m venv .venv
+source .venv/bin/activate   # Windows: .venv\Scripts\activate
+pip install -r requirements.txt
+uvicorn app.main:app --host 0.0.0.0 --port 8001
+```
+
+호출 예:
+
+```bash
+curl -s -X POST "http://localhost:8001/api/v1/recommend" \
+  -H "Content-Type: application/json" \
+  -d '{"clientId":1,"topK":5}' | jq .
+```
+
+### 4.2 Docker 이미지 빌드 및 실행
+
+같은 디렉터리에서 빌드 후 실행:
 
 ```bash
 cd ai-service
@@ -171,146 +287,133 @@ docker build -t ai-recommendation-service .
 docker run -d -p 8001:8001 --env-file .env --name ai-recommendation ai-recommendation-service
 ```
 
----
-
-### GitHub Container Registry (ghcr.io) 이미지
-
-이미지는 **GitHub Container Registry**에 올라가며, 팀원은 빌드 없이 바로 pull해서 쓸 수 있습니다.
-
-**자동 푸시**
-
-- `main` 브랜치에 `ai-service/` 변경이 push되면 GitHub Actions가 이미지를 빌드해 `ghcr.io`에 푸시합니다.
-- 수동 실행: 저장소 **Actions** → **Build and Push ai-service to GHCR** → **Run workflow**.
-
-**이미지 주소 (팀 레포 기준)**
-
-- `ghcr.io/zeniel-project-team3/backend/ai-service:latest`  
-  (또는 `ghcr.io/zeniel-project-team3/backend/ai-service:main`, `ghcr.io/zeniel-project-team3/backend/ai-service:<sha>`)
-
-**로컬에서 pull 후 실행 (빌드 없이)**
+Linux에서 DB가 호스트에 있으면:
 
 ```bash
-# 비공개 이미지인 경우: 먼저 로그인 (GitHub 사용자명 + Personal Access Token, scope: read:packages)
-docker login ghcr.io -u <GitHub사용자명> -p <PAT>
-cd ~/Backend/ai-service
-docker pull ghcr.io/zeniel-project-team3/backend/ai-service:gpt-model
-# docker stop ai-recommendation && docker rm ai-recommendation
-docker run -d -p 8005:8001 --env-file .env --name ai-recommendation ghcr.io/zeniel-project-team3/backend/ai-service:gpt-model
+docker run -d -p 8001:8001 --env-file .env --name ai-recommendation \
+  --add-host=host.docker.internal:host-gateway \
+  ai-recommendation-service
 ```
 
-레포가 **public**이면 패키지도 public으로 두었을 때 로그인 없이 `docker pull` 가능합니다.
+### 4.3 GitHub Container Registry (ghcr.io) 이미지
+
+- **자동 푸시:** `main`(또는 설정된 브랜치)에 push 시 GitHub Actions가 이미지를 빌드해 `ghcr.io`에 푸시.
+- **수동 실행:** 저장소 **Actions** → **Build and Push ai-service to GHCR** → **Run workflow**.
+- **이미지 주소 예:** `ghcr.io/zeniel-project-team3/ai-service:latest` (또는 `:main`, `:gpt-model` 등)
+- **pull 후 실행:** (비공개 시 `docker login ghcr.io` 후) `docker pull ...` → `docker run ... --env-file .env ...`
 
 ---
 
-동작 확인 (같은 PC에서):
+## 5. 임베딩·유사도 요약
 
-```bash
-curl -X POST "http://localhost:8001/api/v1/recommend" \
-  -H "Content-Type: application/json" \
-  -d '{"clientId":1,"topK":5}'
-```
+- **임베딩:** 내담자 **나이, 성별, 희망직종**만 모아 한 문장으로 만든 뒤, OpenAI `text-embedding-3-small`로 벡터화. 희망직종 없으면 "(미정)".
+- **유사도:** DB의 다른 내담자 임베딩과 **코사인 거리**로 비교해, 거리가 작은 순으로 Top-K.
+- **추천:** 희망직종 있으면 유사 케이스 기반으로 직무·훈련·질문 추천. 희망직종 없으면 나이·성별·학력·역량·전공 + 유사 케이스로 희망직종 후보 3개까지 포함.
+- **해시:** 요청 시 나이·성별·희망직종 텍스트의 해시를 비교해, 바뀌었을 때만 새로 임베딩 계산·저장.
 
 ---
 
-## 4. Java에서 호출
+## 6. DB 구조 (스키마)
 
-**URL:** `POST http://<호스트>:8001/api/v1/recommend`  
-**Python 쪽에서 받는 값:** `clientId`, `topK` 두 가지입니다.
+**필요한 테이블**
 
-### Request (Input JSON)
+| 테이블 | 필수 여부 | 비고 |
+|--------|-----------|------|
+| **clients** | **필수** | 내담자 마스터. embedding vector(1536), pgvector 확장 필요. |
+| employment / employments | 선택 | 있으면 유사 케이스에 취업 정보 포함. |
+| training | 선택 | 있으면 유사 케이스에 훈련 이력 포함. |
+| consultation | 선택 | 있으면 유사 케이스에 상담 요약 포함. |
+
+**테이블별 필요 필드 (AI 서비스가 읽거나 씀)**
+
+| 테이블 | 유일 키 | 주요 필드 |
+|--------|---------|-----------|
+| **clients** | id | name, resident_id, age, gender, education, desired_job, competency, address, university, major, embedding |
+| employment | id | client_id, job_title, company_name, salary |
+| training | id | client_id, course_name |
+| consultation | id | client_id, summary |
+
+- **`embedding_source_hash`** (선택): 있으면 **나이·성별·희망직종**으로 만든 텍스트의 해시를 저장해, 다음 요청 시 같은 입력이면 OpenAI 임베딩 호출을 건너뜀. 없어도 동작(매번 임베딩 재계산).
+  - **컬럼을 쓰고 싶다면** `clients` 테이블에 아래 SQL로 추가:
+
+    ```sql
+    ALTER TABLE clients
+    ADD COLUMN IF NOT EXISTS embedding_source_hash VARCHAR(64);
+    ```
+
+  - psql 예: `docker exec -i pgvector psql -U postgres -d postgres -c "ALTER TABLE clients ADD COLUMN IF NOT EXISTS embedding_source_hash VARCHAR(64);"`
+
+---
+
+## 7. /api/v1/recommend 동작 요약
+
+한 번 호출 시:
+
+- **프로필 조회:** clients에서 id, name, resident_id, age, gender, education, desired_job, competency, address, university, major → maskedInput·queryText 생성.
+- **임베딩:** age, gender, desired_job만 합쳐 임베딩 텍스트 → OpenAI → embedding 저장·유사도 검색.
+- **유사 케이스:** clients + employment + training + consultation join → similarCases 반환.
+- **GPT + rule-based:** maskedInput + similarCases → recommendation 생성 (직무·훈련·서비스·질문 등).
+
+---
+
+## 8. /api/v1/re-embedding 동작 요약
+
+**clients** 테이블의 **전체 내담자**에 대해, 나이·성별·희망직종으로 임베딩 텍스트를 만들고 OpenAI로 새 임베딩을 계산한 뒤 **clients.embedding**을 일괄 갱신하는 API.
+
+- **호출:** `POST /api/v1/re-embedding` (body 없음)
+- **동작:** 전체 프로필 조회 → 각 내담자마다 나이·성별·희망직종으로 임베딩 텍스트 생성 → OpenAI 임베딩 API 호출 → `clients.embedding` 갱신. (embedding_source_hash 유무와 관계없이 전원 재계산)
+- **응답:** `{ "updatedCount": N }` (갱신된 내담자 수)
+- **용도:** 임베딩에 쓰는 필드(나이·성별·희망직종) 정의가 바뀌었을 때, 또는 DB를 새로 채운 뒤 일괄 임베딩을 맞추고 싶을 때 사용.
+
+---
+
+## 9. /api/v1/ingest-employment-training 동작요약
+
+엑셀 원본 파일 한 개를 읽어 **employment, training, consultation** 테이블에 적재하는 API.
+
+- **전제:** `.env`에 `INGEST_EXCEL_PATH`로 엑셀 절대 경로 설정. **clients** 테이블은 이미 존재하며, 엑셀의 "참여자 이름 + 주민등록번호"로 매칭.
+- **호출:** `POST /api/v1/ingest-employment-training` (body 없음)
+- 테이블이 없으면 `CREATE TABLE IF NOT EXISTS` 후 INSERT.
+
+---
+
+## 10. Java 연동 (Request/Response)
+
+**URL:** `POST http://<호스트>:8001/api/v1/recommend`
+
+### Request
 
 | 필드 | 타입 | 필수 | 설명 |
 |------|------|------|------|
-| `clientId` | number | O | 내담자 ID (DB `clients.id`) |
-| `topK` | number | X | 유사 케이스 개수 (기본 5, 1~20) |
+| clientId | number | O | 내담자 ID (DB `clients.id`) |
+| topK | number | X | 유사 케이스 개수 (기본 5, 1~20) |
 
-예시:
+예: `{"clientId": 1, "topK": 5}`
 
-```json
-{
-  "clientId": 1,
-  "topK": 5
-}
-```
-
-`topK` 생략 시 5로 처리됩니다.
-
-### Response (Output JSON)
+### Response
 
 | 필드 | 타입 | 설명 |
 |------|------|------|
-| `clientId` | number | 요청한 내담자 ID |
-| `maskedInput` | object | 마스킹된 내담자 정보 (이름·주민번호 마스킹) |
-| `queryText` | string | 임베딩에 사용한 텍스트 |
-| `similarCases` | array | 유사 케이스 목록 (jobTitle이 있는 사람만 포함, 각 항목: clientId, score, age, gender, desiredJob, competency, education, major, university, jobTitle, companyName, salary, trainings, consultationSummary) |
-| `recommendation` | object | 추천 결과 |
+| clientId | number | 요청한 내담자 ID |
+| maskedInput | object | 마스킹된 내담자 정보 |
+| queryText | string | 임베딩에 사용한 텍스트 |
+| similarCases | array | 유사 케이스 목록 |
+| recommendation | object | 추천 결과 |
 
 `recommendation` 내부:
 
 | 필드 | 타입 | 설명 |
 |------|------|------|
-| `recommendedJobsByProfile` | string[] | 나이·성별·학력·역량·전공만 고려한 추천 직무 3개 (희망직종 미반영) |
-| `recommendedJobsByDesiredJob` | string[] | 희망직종을 고려한 추천 직무 3개 |
-| `recommendedTrainings` | string[] | 추천 직업훈련 과정명 등 |
-| `recommendedCompanies` | string[] | 추천 취업처 |
-| `expectedSalaryRange` | string \| null | 예상 연봉 범위 |
-| `suggestedServices` | string[] | 제안 서비스 (직업심리검사, 일경험 등) |
-| `coreQuestions` | string[] | 이번 상담 핵심 질문 |
-| `reason` | string \| null | 추천 근거 |
-
-예시:
-
-```json
-{
-  "clientId": 1,
-  "maskedInput": {
-    "clientId": 1,
-    "name": "정*현",
-    "residentId": "900226-*******",
-    "age": 35,
-    "gender": "남",
-    "education": "2/3년제 대졸",
-    "desiredJob": "편집디자이너\n영상편집\n음악강사",
-    "competency": "C",
-    "address": "울산광역시 남구 ...",
-    "university": "동아방송예술대학교",
-    "major": "음향제작과"
-  },
-  "queryText": "[기본정보]\n나이: 35\n...",
-  "similarCases": [
-    {
-      "clientId": 10,
-      "score": 0.919484,
-      "age": 32,
-      "gender": "여",
-      "desiredJob": "경리사무원\n일반사무원",
-      "competency": "C",
-      "education": "대졸",
-      "major": "음학과",
-      "university": "대경대학교",
-      "jobTitle": "경리사무원",
-      "companyName": null,
-      "salary": null,
-      "trainings": ["전산회계1급 자격증취득과정 B\n그린컴퓨터아카데미\n..."],
-      "consultationSummary": "이관자 진행 확인 필요\n..."
-    }
-  ],
-  "recommendation": {
-    "recommendedJobsByProfile": ["사무직", "경리사무원", "일반사무원"],
-    "recommendedJobsByDesiredJob": ["편집디자이너", "영상편집", "콘텐츠 기획"],
-    "recommendedTrainings": ["전산회계1급 자격증취득과정 B\n그린컴퓨터아카데미\n..."],
-    "recommendedCompanies": [],
-    "expectedSalaryRange": "2,800만원~3,500만원 수준",
-    "suggestedServices": ["직업심리검사", "일경험 프로그램", "국민취업지원제도 연계 상담"],
-    "coreQuestions": ["희망 직종으로 취업하기 위해 ...", "..."],
-    "reason": "유사 사례 기반 추천."
-  }
-}
-```
+| recommendedJobsByProfile | string[] | 나이·성별·학력·역량·전공만 고려한 추천 직무 3개 |
+| recommendedJobsByDesiredJob | string[] | 희망직종 반영 추천 직무 3개 |
+| recommendedTrainings | string[] | 추천 직업훈련 과정명 |
+| recommendedCompanies | string[] | 추천 취업처 |
+| expectedSalaryRange | string \| null | 예상 연봉 범위 |
+| suggestedServices | string[] | 제안 서비스 |
+| coreQuestions | string[] | 상담 핵심 질문 |
+| reason | string \| null | 추천 근거 |
 
 ### Java 호출 예시
-
-같은 PC에서 Docker로 띄운 경우:
 
 ```java
 AiRequestDto request = new AiRequestDto(123, 5);
@@ -323,25 +426,6 @@ AiResponseDto response = restClient.post()
 
 | 환경 | `<호스트>` 예시 |
 |------|------------------|
-| Java와 같은 PC에서 Docker 실행 | `localhost` |
-| Docker Compose 등 같은 네트워크 | 서비스 이름 또는 `localhost` |
+| Java와 같은 PC에서 Docker 실행 | localhost |
+| Docker Compose 등 같은 네트워크 | 서비스 이름 또는 localhost |
 | 다른 서버에 배포 | 해당 서버 IP 또는 도메인 |
-
----
-
-## 6. (개발용) Python 로컬 실행
-
-AI 담당이 코드 수정 후 로컬에서 바로 돌려볼 때만 사용합니다. **Java 팀은 이 단계 없이 Docker만 쓰면 됩니다.**
-
-```bash
-cd ai-service
-python3 -m venv venv
-source venv/bin/activate   # Windows: venv\Scripts\activate
-pip install -r requirements.txt
-uvicorn app.main:app --host 0.0.0.0 --port 8001
-```
-
-호출
-```
-curl -s -X POST "http://localhost:8001/api/v1/recommend"   -H "Content-Type: application/json"   -d '{"clientId":1,"topK":5}' | jq .
-```

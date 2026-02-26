@@ -514,7 +514,7 @@ def ingest_employment_training_from_excel(excel_path: str) -> dict[str, int]:
                     cur.execute(
                         """
                         INSERT INTO consultation (
-                            client_id, summary, created_at, updated_at
+                            client_id, raw_text, created_at, updated_at
                         )
                         VALUES (%s, %s, NOW(), NOW())
                         """,
